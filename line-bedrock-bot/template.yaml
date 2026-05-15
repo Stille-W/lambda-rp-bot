@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: line-bedrock-bot Sample SAM Template for line-bedrock-bot
+
+Parameters: # 在檔案最上方新增參數區塊
+  LineToken:
+    Type: String
+    Default: ""
+  LineSecret:
+    Type: String
+    Default: ""
+Resources:
+  # 1. DynamoDB 儲存歷史紀錄
+  ChatHistoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: LineChatHistory
+      AttributeDefinitions:
+        - AttributeName: UserId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: UserId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ExpireTime # 自動過期欄位
+        Enabled: true
+  # 2. Lambda 函數
+  LineBotFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: hello_world/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Architectures: [arm64]
+      Timeout: 30 # Bedrock 生成需要時間
+      MemorySize: 256
+      Environment:
+        Variables:
+          LINE_CHANNEL_ACCESS_TOKEN: !Ref LineToken
+          LINE_CHANNEL_SECRET: !Ref LineSecret
+          TABLE_NAME: !Ref ChatHistoryTable
+      # 3. IAM 配置 (權限管理)
+      Policies:
+        - DynamoDBCrudPolicy: # 允許讀寫 DynamoDB
+            TableName: !Ref ChatHistoryTable
+        - Statement:
+            - Effect: Allow
+              Action: 'bedrock:InvokeModel' # 允許呼叫 Bedrock
+              Resource:
+                # 1. 基礎模型 (公共資源，中間可以留空 ::)
+                - !Sub 'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-*'
+                # 2. 推論設定檔 (帳號資源，必須包含 AccountId)
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-4-*'
+      # 4. 開放 Function URL
+      FunctionUrlConfig:
+        AuthType: NONE
+
+  ApplicationResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name:
+        Fn::Sub: ApplicationInsights-SAM-${AWS::StackName}
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+  ApplicationInsightsMonitoring:
+    Type: AWS::ApplicationInsights::Application
+    Properties:
+      ResourceGroupName:
+        Ref: ApplicationResourceGroup
+      AutoConfigurationEnabled: 'true'
+Outputs:
+  FunctionUrl:
+    Description: "LINE Webhook URL"
+    Value: !GetAtt LineBotFunctionUrl.FunctionUrl
