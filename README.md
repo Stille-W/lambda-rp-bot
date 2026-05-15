@@ -1,1 +1,1 @@
-# lambdarpbot
+# lambda-rp-bot
